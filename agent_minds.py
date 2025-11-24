@@ -225,7 +225,7 @@ class ExplorerMind(AbstAgent):
     current Master Agent"""
 
 class RescuerMind(AbstAgent):
-    def __init__(self, env, config_file, data_folder, exploration_map, pred_model, tri_pred, cluster_labels, Master_Agent=False):
+    def __init__(self, env, config_file, data_folder, exploration_map, pred_model, tri_pred, sobr_pred, cluster_labels, Master_Agent=False):
         super().__init__(env, config_file)
         self.exploration_map = exploration_map
         self.data_folder = data_folder
@@ -250,10 +250,13 @@ class RescuerMind(AbstAgent):
         if Master_Agent:
             self.prediction_model = self.learn_model(self.training_data_set_path)
             self.tri_predicted = self.predict_data_set(self.found_data_set_path, self.prediction_model)
+            self.prediction_model_sobr = self.learn_model_sobr(self.training_data_set_path)
+            self.sobr_predicted = self.predict_sobr(self.found_data_set_path, self.prediction_model_sobr)
             self.cluster_labels = self.clusterize(3) #creates a number of clusters equal to the number of rescuer agents
         else:
             self.prediction_model = pred_model
             self.tri_predicted = tri_pred
+            self.sobr_predicted = sobr_pred
             self.cluster_labels = cluster_labels
 
         #appends in the list, victims that are on this agent's assigned cluster
@@ -355,6 +358,41 @@ class RescuerMind(AbstAgent):
 
 # -------------------------------------------------------------------------------
 
+    """MLP regressor training algorithm from first assigment, trains on the same random seed"""
+
+    def learn_model_sobr(self, data_set_path):
+
+        df = pd.read_csv(data_set_path)
+
+        X = df.drop(columns=["gcs", "avpu", "tri", "sobr"])
+        y = df["sobr"]
+
+        X_train, X_test, y_train, y_test = sk.model_selection.train_test_split(
+            X, y, test_size=0.2, random_state=42
+        )
+
+        model = sk.neural_network.MLPRegressor(
+            hidden_layer_sizes=(10, 10, 10, 10, 10, 10),
+            activation="tanh",
+            solver="sgd",
+            learning_rate="adaptive",
+            learning_rate_init=0.025,
+            max_iter=2000,
+            random_state=42
+        )
+
+        model.fit(X_train, y_train)
+
+        y_pred = model.predict(X_test)
+        mse = sk.metrics.mean_squared_error(y_test, y_pred)
+        print(f"[SOBR-MLP] MSE Test: {mse:.4f}")
+
+        model.fit(X, y)
+
+        return model
+
+# -------------------------------------------------------------------------------
+
     def predict_data_set(self, data_set_path, prediction_model):
 
         df_final = pd.read_csv(data_set_path)
@@ -362,6 +400,21 @@ class RescuerMind(AbstAgent):
         y_pred_test = prediction_model.predict(x)
         print(f'==== Predicted the following [tri]s ====\n{y_pred_test}\n')
         return y_pred_test
+
+# -------------------------------------------------------------------------------
+
+    def predict_sobr(self, data_set_path, model):
+
+        df = pd.read_csv(data_set_path)
+
+        X = df.drop(columns=["gcs", "avpu"])   # igual ao treino
+
+        sobr_pred = model.predict(X)
+
+        print(f"[SOBR-MLP] Predicted SOBR for found victims:")
+        print(sobr_pred)
+
+        return sobr_pred    
 
 # -------------------------------------------------------------------------------
 
@@ -377,17 +430,60 @@ class RescuerMind(AbstAgent):
 
     def clusterize(self, n_clusters):
 
-        X = [list(coord) for coord in self.victims_found]
+        import numpy as np
+        from sklearn.cluster import KMeans
 
-        kmeans = sk.cluster.KMeans(n_clusters=n_clusters, max_iter=300, random_state=42)
-        kmeans.fit(X)
+        pts = np.array([list(coord) for coord in self.victims_found])
+        n = len(pts)
+        if n == 0:
+            return np.array([])
 
-        labels = kmeans.labels_
+        # 1) Run KMeans to get centroids
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        kmeans.fit(pts)
+        centers = kmeans.cluster_centers_
 
+        # 2) compute desired sizes: distribute remainder among first clusters
+        base = n // n_clusters
+        rem = n % n_clusters
+        capacities = [base + (1 if i < rem else 0) for i in range(n_clusters)]
+
+        # 3) compute all distances (n_points x n_clusters)
+        dists = np.linalg.norm(pts[:, None, :] - centers[None, :, :], axis=2)
+
+        # 4) create list of (dist, point_idx, cluster_idx) and sort
+        rows = []
+        for i in range(n):
+            for c in range(n_clusters):
+                rows.append((dists[i, c], i, c))
+        rows.sort(key=lambda x: x[0])
+
+        # 5) greedy assignment respecting capacities
+        labels = -1 * np.ones(n, dtype=int)
+        filled = [0] * n_clusters
+        for dist, i, c in rows:
+            if labels[i] != -1:
+                continue  # already assigned
+            if filled[c] < capacities[c]:
+                labels[i] = c
+                filled[c] += 1
+
+        # 6) if any point unassigned (edge cases), assign to nearest cluster with room
+        for i in range(n):
+            if labels[i] == -1:
+                # assign to nearest cluster that has capacity
+                order = np.argsort(dists[i])
+                for c in order:
+                    if filled[c] < capacities[c]:
+                        labels[i] = c
+                        filled[c] += 1
+                        break
+
+        # debug prints
         unique, counts = np.unique(labels, return_counts=True)
         for cluster_id, count in zip(unique, counts):
             print(f"Cluster {cluster_id} has {count} elements")
-        print('\n')
+        print(f"capacities = {capacities}, filled = {filled}")
 
         return labels
 

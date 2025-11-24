@@ -186,11 +186,11 @@ def main ():
     resc_agents = []
 
     resc_agent1 = RescuerMind(environment,'94x94_408v/env_agent_config4.txt', DATA_FOLDER, exploration_map,
-                              None, None, None, Master_Agent=True)
+                              None, None, None, None, Master_Agent=True)
     resc_agent2 = RescuerMind(environment, '94x94_408v/env_agent_config5.txt', DATA_FOLDER, exploration_map,
-                              resc_agent1.prediction_model, resc_agent1.tri_predicted, resc_agent1.cluster_labels)
+                              resc_agent1.prediction_model, resc_agent1.tri_predicted, resc_agent1.sobr_predicted, resc_agent1.cluster_labels)
     resc_agent3 = RescuerMind(environment, '94x94_408v/env_agent_config6.txt', DATA_FOLDER, exploration_map,
-                              resc_agent1.prediction_model, resc_agent1.tri_predicted, resc_agent1.cluster_labels)
+                              resc_agent1.prediction_model, resc_agent1.tri_predicted, resc_agent1.sobr_predicted, resc_agent1.cluster_labels)
     resc_agents.append(resc_agent1)
     resc_agents.append(resc_agent2)
     resc_agents.append(resc_agent3)
