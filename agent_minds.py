@@ -8,6 +8,7 @@ import pandas as pd
 import sklearn as sk
 import random
 import math
+import pygad
 # import utilitarios as util
 from constants import VS
 from abstract_agent import AbstAgent
@@ -234,6 +235,7 @@ class RescuerMind(AbstAgent):
         self.env_victims_found_path = os.path.join(self.data_folder, "env_victims_found.txt")
         self.victims_found = [] #stores the coordinates of all found victims in exploration phase
         self.assigned_victims = [] #stores the coordinates of victims that the agent was assigned to rescue
+        self.base_coord = (env.dic["BASE"][0], env.dic["BASE"][1])
 
         #hard-coded solution to assign a cluster to the agent based on their self.NAME
         self.assigned_cluster = (int(''.join([c for c in self.NAME if c.isdigit()])) - 1) # returns the number in their name -1
@@ -270,6 +272,10 @@ class RescuerMind(AbstAgent):
         print(f'Assigned Cluster to {self.NAME}: {self.assigned_cluster}')
         print(f'Assigned Victims of Cluster {self.assigned_cluster}:\n{self.assigned_victims}\n')
 
+        #where we would call calculate_optimal_sequence, although here i'm executing it on top of all victims
+        #ideally we would execute it for each different tri group
+        self.rescue_path, self.rescue_path_cost = self.calculate_optimal_sequence(self.assigned_victims, self.base_coord)
+    
 # -------------------------------------------------------------------------------
 
     def deliberate(self):
@@ -486,5 +492,139 @@ class RescuerMind(AbstAgent):
         print(f"capacities = {capacities}, filled = {filled}")
 
         return labels
+
+# -------------------------------------------------------------------------------
+
+   """
+    Uses pygad's Genetic Algorithm to compute the visit sequence, sensitive to
+    clusterization and exploration_map results
+    ------------
+    victims = a list of tuples, cointaing the coordinates of the victims (or locations) 
+              to be visited
+    start = also a tuple, the coordinates of the starting node of the sequence, doesn't
+            need to be inside victims
+    ------------
+    Returns the found sequence and the optimal path for that sequence
+"""
+
+    def calculate_optimal_sequence (self, victims, start):
+
+        # Building adjency and path matrixes--------------
+        adj_matrix = [] # stores the cheapest costs
+        path_matrix = [] # stores the cheapest paths
+
+        # includes start in if it's not inside victims
+        if start not in victims:
+            all_locations = [start] + victims
+        else:
+            all_locations = victims
+
+        for row in all_locations:
+            adj_matrix_row = []
+            path_matrix_row = []
+            for col in all_locations:
+                path, cost = self.get_cheapest_path(row, col)
+                adj_matrix_row.append(cost)
+                path_matrix_row.append(path)
+            adj_matrix.append(adj_matrix_row)
+            path_matrix.append(path_matrix_row)
+
+        adj_matrix = np.array(adj_matrix)
+        #print(path_matrix)
+        #print(adj_matrix)
+
+
+        # Initialization of variables-----------------
+        num_nodes = adj_matrix.shape[0]
+        start_node = all_locations.index(start) # the only index that will never appear in any gene (allways 0 if start not in victims)
+        all_nodes = list(range(num_nodes))
+        print(f'All_Nodes: {all_nodes}')
+
+
+        # Genetic Algorithm's fitness function------------------
+        def fitness_function(GA, solution, solution_idx):
+
+            path = [start_node] + solution.tolist()
+
+            # print(f'Index: {solution_idx}')
+            # print(f'Populacao:\n{GA.population}')
+            # print(f'path: {path}')
+
+            cost = 0
+            for i in range(len(path) - 1):
+                cost += adj_matrix[path[i], path[i + 1]]
+            return 1.0 / cost # PyGAD Maximizes
+
+
+        # GA configuration-------------------
+        gene_space = [n for n in all_nodes if n != start_node] # explained right bellow
+
+        ga_instance = pygad.GA(
+            num_generations=700,  # number of generations
+            num_parents_mating=10,  # number of solutions that are selected as parents
+            fitness_func=fitness_function,  # fitness function (pygad searches for highest)
+            sol_per_pop=20,  # solutions per generation
+
+            num_genes=num_nodes - 1,  # number of genes per solution (the number of nodes to visit)
+            gene_space=gene_space,  # discreetly defines all the possible values for a gene
+            allow_duplicate_genes=False, # False because we want all possible values of gene_space
+            gene_type=int,
+
+            parent_selection_type="rws",  # selection by roulette
+            keep_elitism=2, # the ammount of best solutions that go to the next generation (usually 5% of total pop)
+            crossover_type="single_point",
+            crossover_probability=0.8, # (usually between 0.7 and 0.9)
+            mutation_type="random",
+            mutation_probability=0.05 # (usually between 0.01 and 0.05)
+        )
+
+
+        # Runs the GA and gets the results----------------------
+        ga_instance.run()
+
+        # Gets the best solution
+        solution, solution_fitness, solution_idx = ga_instance.best_solution()
+        best_sequence = [start_node] + solution.tolist()
+
+        # Gets the cost of the best solution
+        best_cost = 0
+        for i in range(len(best_sequence) - 1):
+            best_cost += adj_matrix[best_sequence[i], best_sequence[i + 1]]
+
+        # Gets the best path according to the best sequence
+        best_path = []
+        best_path += path_matrix[best_sequence[0]][best_sequence[1]]
+        for i in range(1,len(best_sequence)-1):
+            path_segment = path_matrix[best_sequence[i]][best_sequence[i + 1]]
+            path_segment.pop(0) # removes the first element to avoid repetion
+            best_path += path_segment
+
+        print(f'Resulting Best Sequence: indx {solution_idx}\n{best_sequence}')
+        print("Cost:", best_cost)
+        print(f'Best Path: {best_path}')
+
+        return best_path, best_sequence
+
+# -------------------------------------------------------------------------------
+
+    def get_cheapest_path(self, initial_pos, target_pos):
+
+
+        src_x, src_y = initial_pos
+        target_x, target_y = target_pos
+
+        def heuristic(a, b):  # Euclidean distance
+            (x1, y1), (x2, y2) = a, b
+            return math.hypot(x2 - x1, y2 - y1)
+
+        path = nx.astar_path(self.exploration_map, (src_x, src_y), (target_x, target_y), heuristic=heuristic)
+        cost = nx.path_weight(self.exploration_map, path, weight='weight')
+        # print(f'Shortest Path to base: {path}')
+        # print(f'Cost: {cost} Rtime: {self.get_rtime()}')
+
+        return path, cost
+
+# ===============================================================================
+
 
 # ===============================================================================
