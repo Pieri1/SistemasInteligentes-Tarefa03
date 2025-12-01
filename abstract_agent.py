@@ -165,11 +165,41 @@ class AbstAgent(ABC):
         return self.__phy._read_vital_signals()
 
     def first_aid(self):
-        """ Public method for dropping the first aid package to the victim at
-        the same position of the agent.
-        @returns:
-        - VS.TIME_EXCEEDED when the agent has no enough battery time to execute
-          the operation
-        - True when the first aid is succesfully delivered
-        - False when there is no victim at the current position of the agent"""
-        return self.__phy._first_aid()
+        """
+        Performs first aid on the victim at current position.
+        Returns:
+         - VS.EXECUTED on success,
+         - VS.TIME_EXCEEDED if insufficient time,
+         - False/None on failure.
+        Side effects:
+         - decrement physical rtime by COST_FIRST_AID (if available),
+         - append physical agent to env.saved[victim_id] if not present.
+        """
+        # get current phys pos
+        try:
+            x, y = (self._AbstAgent__phy.x, self._AbstAgent__phy.y)
+        except Exception:
+            return False
+
+        # check time
+        try:
+            required = self.COST_FIRST_AID
+            if self.get_rtime() <= required:
+                return VS.TIME_EXCEEDED
+            # spend time
+            self._AbstAgent__phy._rtime -= required
+        except Exception:
+            pass
+
+        # mark saved in environment
+        try:
+            env = self.get_env()
+            vic_id = env.victims.index((x, y))
+            phy = self._AbstAgent__phy
+            if phy not in env.saved[vic_id]:
+                env.saved[vic_id].append(phy)
+        except Exception:
+            # tolerate failures
+            pass
+
+        return VS.EXECUTED

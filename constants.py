@@ -47,3 +47,10 @@ class VS:
     VIC_COLOR_YEL = (255, 255, 0)   # YELLOW
     VIC_COLOR_GRN = (0, 255, 0)     # GREEN
     VIC_COLOR_LIST = [VIC_COLOR_GRN, VIC_COLOR_YEL, VIC_COLOR_RED, VIC_COLOR_BLK]
+
+# General configuration defaults (avoid hard-coded literals across the codebase)
+GRID_SIZE = 94
+SCREEN_WIDTH = 800
+SCREEN_HEIGHT = 700
+# Default safety margin (rtime units) used by RescuerMind when deciding to return
+DEFAULT_RETURN_MARGIN = 8
