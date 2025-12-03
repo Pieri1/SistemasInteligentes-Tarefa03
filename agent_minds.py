@@ -238,6 +238,8 @@ class RescuerMind(AbstAgent):
         self.victims_found = [] #stores the coordinates of all found victims in exploration phase
         self.assigned_victims = [] #stores the coordinates of victims that the agent was assigned to rescue
         self.base_coord = (env.dic["BASE"][0], env.dic["BASE"][1])
+        # path trace for later visualization
+        self.trace_path = [self.base_coord]
 
         # assigned_cluster can be provided externally (preferred). Fallback to legacy
         # name-parsing behaviour for backwards compatibility.
@@ -498,6 +500,13 @@ class RescuerMind(AbstAgent):
                 self.position = (self._AbstAgent__phy.x, self._AbstAgent__phy.y)
             except Exception:
                 self.position = (cur_x + dx, cur_y + dy)
+
+            # record path point for later rendering
+            try:
+                if hasattr(self, 'trace_path'):
+                    self.trace_path.append(self.position)
+            except Exception:
+                pass
 
             # After moving, ensure we still have enough battery to return.
             # If not, force the state to RETURNING and precompute return path.

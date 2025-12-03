@@ -14,7 +14,7 @@ try:
 except Exception:
     KMeans = None
 from constants import VS, GRID_SIZE, SCREEN_WIDTH, SCREEN_HEIGHT
-# import utilitarios as util
+import utilitarios as util
 
 #===============================================================================
 
@@ -316,6 +316,17 @@ def main ():
                         continue
     else:
         print('\n - No victims were saved')
+
+    # Generate simple Found vs Saved chart using environment counts only
+    total_counts = {k: environment.tri.count(k) for k in [0,1,2,3]}
+    saved_counts = {k: sum(1 for vid, t in enumerate(environment.tri) if t == k and environment.saved[vid]) for k in [0,1,2,3]}
+    util.plot_saved_vs_found_counts(total_counts, saved_counts, save_path='saved_vs_found.png')
+
+    # Render rescuer traces map using TRACE_COLOR and saved victim markers
+    try:
+        util.draw_rescuer_traces(environment, resc_agents, save_path='rescuer_traces.png')
+    except Exception:
+        pass
 
 
 if __name__ == '__main__':
