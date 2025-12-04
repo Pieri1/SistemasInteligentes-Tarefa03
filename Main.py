@@ -188,9 +188,6 @@ def main ():
 
 
     # Rescuing Phase---------------------
-
-    # Define rescuer configuration files (one entry per rescuer). This makes the
-    # number of rescuers explicit and easy to change without scattering literals.
     rescuer_configs = [
         '94x94_408v/env_agent_config4.txt',
         '94x94_408v/env_agent_config5.txt',
@@ -199,8 +196,6 @@ def main ():
 
     resc_agents = []
 
-    # Create the master rescuer first and let it compute clusters with n_clusters
-    # equal to the total number of rescuers (dynamic)
     total_rescuers = len(rescuer_configs)
     master_cfg = rescuer_configs[0]
     master = RescuerMind(environment, master_cfg, DATA_FOLDER, exploration_map,
@@ -208,8 +203,6 @@ def main ():
                          Master_Agent=True, assigned_cluster=0, n_clusters=total_rescuers)
     resc_agents.append(master)
 
-    # Create remaining rescuers, passing master's models and labels and assigning
-    # each rescuer an index-based assigned_cluster (0..n-1)
     for idx, cfg in enumerate(rescuer_configs[1:], start=1):
         agent = RescuerMind(environment, cfg, DATA_FOLDER, exploration_map,
                             pred_model=master.prediction_model,
@@ -223,21 +216,17 @@ def main ():
     for agent in resc_agents:
         agent.set_state(VS.ACTIVE)
 
-    # Run the environment so rescuer agents' deliberate() is executed
     environment.run()
 
-    # draw using master (first rescuer) cluster labels
     try:
         debug_draw(environment, master.cluster_labels)
     except Exception:
-        # fallback: if master not available or has no labels, skip drawing
         pass
 
     write_cluster_files(resc_agents)
 
     # Final summary: print accumulated and per-agent results + concise stats
     print('\n=== FINAL SUMMARY ===')
-    # Environment already provides detailed printing routines
     try:
         environment.print_acum_results()
     except Exception:
@@ -258,18 +247,14 @@ def main ():
             consumed = phy.mind.TLIM - phy._rtime
             print(f"   {phy.mind.NAME}: consumed {consumed:.2f} of {phy.mind.TLIM:.2f}")
         except Exception:
-            # defensive: if attributes aren't present, skip
             print(f"   {getattr(phy.mind, 'NAME', repr(phy.mind))}: energy info not available")
 
     saved_indices = [i for i, lst in enumerate(environment.saved) if lst]
     if saved_indices:
-        # Use the Master agent's precomputed clustering (one cluster per rescuer)
-        # Build a coordinate -> cluster label mapping from the master's labels
         coord_to_label = {}
         try:
             master = resc_agents[0]
             for idx, coord in enumerate(master.victims_found):
-                # master.cluster_labels aligns with master.victims_found
                 coord_to_label[coord] = master.cluster_labels[idx]
         except Exception:
             coord_to_label = {}
@@ -320,7 +305,30 @@ def main ():
     # Generate simple Found vs Saved chart using environment counts only
     total_counts = {k: environment.tri.count(k) for k in [0,1,2,3]}
     saved_counts = {k: sum(1 for vid, t in enumerate(environment.tri) if t == k and environment.saved[vid]) for k in [0,1,2,3]}
-    util.plot_saved_vs_found_counts(total_counts, saved_counts, save_path='saved_vs_found.png')
+    # Build per-rescuer saved counts per tri category for stacked bars
+    saved_by_rescuer = []
+    for resc in resc_agents:
+        counts = {k: 0 for k in [0,1,2,3]}
+        # Count victims saved by this rescuer by tri category
+        for vid, savers in enumerate(environment.saved):
+            if any(getattr(phy.mind, 'NAME', None) == resc.NAME for phy in savers):
+                tri_k = environment.tri[vid]
+                counts[tri_k] = counts.get(tri_k, 0) + 1
+        saved_by_rescuer.append(counts)
+
+    util.plot_saved_vs_found_counts(total_counts, saved_counts, save_path='saved_vs_found.png', saved_by_rescuer=saved_by_rescuer)
+
+    # Generate Totals vs Found chart per explorer (stacked)
+    found_by_explorer = []
+    for exp in expl_agents:
+        counts = {k: 0 for k in [0,1,2,3]}
+        for vid, finders in enumerate(environment.found):
+            if any(getattr(phy.mind, 'NAME', None) == exp.NAME for phy in finders):
+                tri_k = environment.tri[vid]
+                counts[tri_k] = counts.get(tri_k, 0) + 1
+        found_by_explorer.append(counts)
+
+    util.plot_found_vs_total_by_explorer(total_counts, found_by_explorer, save_path='found_by_explorer.png')
 
     # Render rescuer traces map using TRACE_COLOR and saved victim markers
     try:

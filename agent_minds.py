@@ -165,13 +165,12 @@ class ExplorerMind(AbstAgent):
 
             if dx != 0 and dy != 0:  # diagonal
                 base = self.COST_DIAG
-            else:  # walk vertical or horizontal
+            else:  # vertical or horizontal
                 base = self.COST_LINE
 
             nbr_x, nbr_y = x + dx, y + dy
 
             self.mental_map.add_node((x, y))
-            #adds two edges with different costs, one to go, and one to come back
             cost = base * self.get_env().obst[nbr_x][nbr_y]
             self.mental_map.add_edge((x,y),(nbr_x,nbr_y), weight=cost, direction=(dx,dy))
 
@@ -288,10 +287,8 @@ class RescuerMind(AbstAgent):
         print(f'Assigned Cluster to {self.NAME}: {self.assigned_cluster}')
         print(f'Assigned Victims of Cluster {self.assigned_cluster}:\n{self.assigned_victims}\n')
 
-        #where we would call calculate_optimal_sequence, although here i'm executing it on top of all victims
-        #ideally we would execute it for each different tri group
         self.rescue_path, self.rescue_path_cost = self.calculate_optimal_sequence(self.assigned_victims, self.base_coord)
-        # persistent position tracked by the mind (keeps in sync with physical part)
+
         try:
             self.position = (self._AbstAgent__phy.x, self._AbstAgent__phy.y)
         except Exception:
@@ -313,99 +310,83 @@ class RescuerMind(AbstAgent):
         - States: RESCUING → RETURNING → FINISHED
         """
 
-        # -------------------------------
-        # Initialize stateful variables
-        # -------------------------------
+        # Inicializa
         if not hasattr(self, "state"):
             self.state = "RESCUING"
             self.rescue_step_index = 0
             print(f"{self.NAME}: Starting RESCUE operation.")
-            # ensure mind has a current position tracked
+            # garante que a mente tem uma posição atual rastreada
             try:
                 self.position = (self._AbstAgent__phy.x, self._AbstAgent__phy.y)
             except Exception:
                 self.position = self.base_coord
 
-        # always sync mind position with physical part at the start of deliberation
+        # sempre sincroniza a posição da mente com a parte física no início da deliberação
         try:
             self.position = (self._AbstAgent__phy.x, self._AbstAgent__phy.y)
         except Exception:
             pass
 
-        # If no victims or no path → nothing to do
         if not self.rescue_path or not self.assigned_victims:
             self.state = "RETURNING"
 
-        # -------------------------------------------------------
-        # BATTERY CHECK — identical behavior to the EXPLORER
-        # -------------------------------------------------------
         def enough_battery_to_continue():
-            # Simple heuristic: return to base if battery < distance_to_base * cost_per_step
-            # Uses the mind-tracked position (kept in sync with physical agent)
+            # Heurística simples: retorna para a base se bateria < distância_para_base * custo_por_passo
             current = self.position
             _, cost_back = self.get_cheapest_path(current, self.base_coord)
-            # use the physical part remaining time (rtime) via the public getter
-            # use a configurable margin to increase safety (reserve rtime for unexpected costs)
+            # usa o tempo restante (rtime) da parte física via getter público
+            # usa uma margem configurável para aumentar a segurança (reserva rtime para custos inesperados)
             margin = getattr(self, 'return_margin', 8)
             return self.get_rtime() > cost_back + margin  # margin
 
-        # ================================================
-        # PHASE 1 — RESCUING
-        # ================================================
+        # RESCUING
         if self.state == "RESCUING":
 
-            # Battery too low → interrupt rescue and go home
+            # Battery too low
             if not enough_battery_to_continue():
                 print(f"{self.NAME}: Battery low → returning to base BEFORE finishing rescue.")
                 self.state = "RETURNING"
-                # Precompute path to base
                 self.return_path, _ = self.get_cheapest_path(self.position, self.base_coord)
                 self.return_index = 0
 
             else:
-                # Normal rescue progression
                 if self.rescue_step_index >= len(self.rescue_path):
                     print(f"{self.NAME}: Finished rescue path. Returning to base.")
                     self.state = "RETURNING"
                     self.return_path, _ = self.get_cheapest_path(self.position, self.base_coord)
                     self.return_index = 0
                 else:
-                    # Continue toward next waypoint
                     target = self.rescue_path[self.rescue_step_index]
 
-                    # If already at that coordinate → progress
+                    # Se já estiver naquela coordenada → avança
                     if self.position == target:
 
                         # RESCUE LOGIC
                         if target in self.assigned_victims:
                             print(f"{self.NAME}: Victim rescued at {target}.")
-                            # Attempt to perform first aid via the public API
+                            # Tenta realizar primeiros socorros
                             try:
                                 res = self.first_aid()
                             except Exception:
                                 res = False
 
-                            # If time exceeded during first aid, signal termination
                             if res == VS.TIME_EXCEEDED:
                                 print(f"{self.NAME}: TIME_EXCEEDED while giving first aid at {target}.")
                                 return False
 
-                            # If first aid was successful, ensure environment.saved is updated
-                            # accept both boolean True and VS.EXECUTED from first_aid()
+                            # Se primeiros socorros foram bem-sucedidos
                             if res is True or res == VS.EXECUTED:
                                 try:
-                                    # find victim id and append physical agent to saved if not present
                                     vic_id = self.get_env().victims.index(target)
                                     phy = self._AbstAgent__phy
                                     if phy not in self.get_env().saved[vic_id]:
                                         self.get_env().saved[vic_id].append(phy)
 
-                                    # --- record saved sequence for this rescuer (keep order) ---
+                                    # --- registra sequência de salvamento para este socorrista (mantém ordem) ---
                                     if not hasattr(self, 'saved_sequence'):
                                         self.saved_sequence = []
                                     self.saved_sequence.append(vic_id)
                                 except Exception:
-                                    # don't crash on bookkeeping failures
                                     pass
 
                                 # Spend an extra 1 unit of battery per explicit save
@@ -425,16 +406,14 @@ class RescuerMind(AbstAgent):
                             self.state = "RETURNING"
                             self.return_path, _ = self.get_cheapest_path(self.position, self.base_coord)
                             self.return_index = 0
-                            return None
+                            return True
 
                         target = self.rescue_path[self.rescue_step_index]
 
                     # Issue movement
                     return self.moveTo(*target)
 
-        # ================================================
-        # PHASE 2 — RETURNING TO BASE (Explorer-like)
-        # ================================================
+        # RETURNING
         if self.state == "RETURNING":
 
             # Safety: compute return path if missing
@@ -466,9 +445,7 @@ class RescuerMind(AbstAgent):
             self.return_index = 0
             return None
 
-        # ================================================
-        # PHASE 3 — FINISHED (Explorer-like final state)
-        # ================================================
+        # FINISHED
         if self.state == "FINISHED":
             return False
 
@@ -662,7 +639,9 @@ class RescuerMind(AbstAgent):
         print(f"[SOBR-MLP] Predicted SOBR for found victims:")
         print(sobr_pred)
 
-        return sobr_pred    
+
+        return sobr_pred   
+     
 
 # -------------------------------------------------------------------------------
 
@@ -781,8 +760,20 @@ class RescuerMind(AbstAgent):
             # print(f'path: {path}')
 
             cost = 0
-            for i in range(len(path) - 1):
-                cost += adj_matrix[path[i], path[i + 1]]
+            for i in range(len(path)-1):
+                coord = all_locations[path[i+1]]
+
+                index = self.victims_found.index(coord)
+                vic_sobr = self.sobr_predicted[index]
+
+                #[0.1, 0.8, 0.2] sobr total -0.7 + 0.6 = -0.1
+                #[0.8, 0.2, 0.1] sobr total 0.6 + 0.1 = 0.7
+                #[0.1, 0.2, 0.8] sobr total -0.1 -0.6 = -0.7
+
+                #cost += (adj_matrix[path[i], path[i + 1]])
+                urgencia = (1 - vic_sobr)
+                penalty = urgencia * (i ** 2)
+                cost += adj_matrix[path[i], path[i + 1]] + penalty
             return 1.0 / cost # PyGAD Maximizes
 
 
